@@ -71,6 +71,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "interface/mmal/util/mmal_util_params.h"
 #include "interface/mmal/util/mmal_default_components.h"
 #include "interface/mmal/util/mmal_connection.h"
+#include "interface/mmal/mmal_parameters_camera.h"
+
+#include "interface/vcsm/user-vcsm.h"
+
 
 #include "RaspiCapture.h"
 #include "RaspiCamControl.h"
@@ -134,6 +138,9 @@ struct RASPIVID_STATE_T
    int64_t last_second;
 
    RASPIPREVIEW_STATE preview_state;
+
+  unsigned int lens_shading;
+
 };
 
 
@@ -1077,6 +1084,33 @@ static MMAL_STATUS_T create_camera_component(RASPIVID_STATE *state)
       vcos_log_error("Unable to enable control port : error %d", status);
       goto error;
    }
+
+      printf("Setting Shading...\n");
+
+      MMAL_PARAMETER_LENS_SHADING_T ls = {{MMAL_PARAMETER_LENS_SHADING_OVERRIDE, sizeof(MMAL_PARAMETER_LENS_SHADING_T)}};
+      void *grid;
+
+      #include "ls_table.h"
+
+      ls.enabled = MMAL_TRUE;
+      ls.grid_cell_size = 64;
+      ls.grid_width = ls.grid_stride = grid_width;
+      ls.grid_height = grid_height;
+      ls.ref_transform = ref_transform;
+
+      state->lens_shading = vcsm_malloc(ls.grid_stride*ls.grid_height*4, "ls_grid");
+      ls.mem_handle_table = vcsm_vc_hdl_from_hdl(state->lens_shading);
+
+      grid = vcsm_lock(state->lens_shading);
+
+      memcpy(grid, ls_grid, vcos_min(sizeof(ls_grid), ls.grid_stride*ls.grid_height*4));
+
+      vcsm_unlock_hdl(state->lens_shading);
+
+      status = mmal_port_parameter_set(camera->control, &ls.hdr);
+      if (status != MMAL_SUCCESS)
+         vcos_log_error("Failed to set lens shading parameters - %d", status);
+
 
    state->camera_component = camera;
 
